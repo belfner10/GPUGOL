@@ -7,7 +7,7 @@ import math
 
 def draw_grid(cur):
     os.system('cls')
-    output = '+'+((cur.shape[1]) * '--')+'+\n'
+    output = '+' + ((cur.shape[1]) * '--') + '+\n'
     for row in cur:
         output += '|'
         for cell in row:
@@ -16,13 +16,15 @@ def draw_grid(cur):
             else:
                 output += '  '
         output += '|\n'
-    output += ('+'+((cur.shape[1]) * '--')+'+\n')
+    output += ('+' + ((cur.shape[1]) * '--') + '+\n')
     print(output)
 
 
 @cuda.jit
-def kernal(A, B):
+def kernal(A, B, size):
     x, y = cuda.grid(2)
+    if x >= size[1] or y >= size[0]:
+        return
     num_surround = 0
     for ty in range(max(0, y - 1), min(A.shape[0], y + 2)):
         for tx in range(max(0, x - 1), min(A.shape[1], x + 2)):
@@ -33,6 +35,7 @@ def kernal(A, B):
         B[y, x] = 1
     else:
         B[y, x] = 0
+
 
 @jit(nopython=True)
 def step(cells):
@@ -65,11 +68,13 @@ def init(width, height):
 
 
 def main(width, height):
+    size = (height, width)
     np.random.seed(100)
     cells = init(width, height)
 
     A_global_mem = cuda.to_device(cells)
-    B_global_mem = cuda.to_device(np.zeros((height, width), dtype=int))
+    b = np.zeros(size, dtype=int)
+    B_global_mem = cuda.to_device(b)
 
     threadsperblock = (16, 16)
     blockspergrid_x = int(math.ceil(cells.shape[1] / threadsperblock[1]))
@@ -77,14 +82,14 @@ def main(width, height):
     blockspergrid = (blockspergrid_x, blockspergrid_y)
 
     start = time.perf_counter()
-    cycles = 10000
+    cycles = 1000
     sign = True
     for _ in range(cycles):
         if sign:
-            kernal[blockspergrid, threadsperblock](A_global_mem, B_global_mem)
+            kernal[blockspergrid, threadsperblock](A_global_mem, B_global_mem, size)
             cells_nv = B_global_mem.copy_to_host()
         else:
-            kernal[blockspergrid, threadsperblock](B_global_mem, A_global_mem)
+            kernal[blockspergrid, threadsperblock](B_global_mem, A_global_mem, size)
             cells_nv = A_global_mem.copy_to_host()
         sign = not sign
         # cells = step(cells)
@@ -93,8 +98,8 @@ def main(width, height):
         # draw_grid(cells_nv)
 
     end = time.perf_counter()
-    print(f'Cycles per second: {cycles/(end - start):0.0f}')
+    print(f'Cycles per second: {cycles / (end - start):0.0f}')
 
 
 if __name__ == "__main__":
-    main(600, 600)
+    main(400, 400)
